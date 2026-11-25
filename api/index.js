@@ -111,65 +111,19 @@ async function searchWeb(query, timeoutMs) {
 }
 
 async function askGemini(text, history, searchContext, timeoutMs) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("MISSING_GEMINI_KEY");
-  if (timeoutMs < 250) throw new Error("TIME_BUDGET_EXHAUSTED");
-
-  const model = String(process.env.GEMINI_MODEL || DEFAULT_MODEL).trim();
-  if (!/^[A-Za-z0-9._-]+$/.test(model)) throw new Error("INVALID_MODEL_NAME");
-
-  const contents = safeHistory(history).map(item => ({
-    role: item.role,
-    parts: [{ text: item.text }]
-  }));
-
-  const prompt = searchContext
-    ? `${text}\n\nРезультаты поиска в интернете:\n${searchContext}\nИспользуй их только там, где они относятся к вопросу.`
-    : text;
-  contents.push({ role: "user", parts: [{ text: prompt }] });
-
-  const { response, data } = await fetchJson(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": key
-      },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents,
-        generationConfig: {
-          temperature: 0.5,
-          maxOutputTokens: 240
-        }
-      })
-    },
-    Math.min(GEMINI_TIMEOUT_MS, timeoutMs)
-  );
-
-  if (!response.ok) {
-    const status = Number(response.status);
-    console.error("Gemini request failed with HTTP", status);
-    if (status === 401 || status === 403) throw new Error("GEMINI_KEY_REJECTED");
-    if (status === 429) throw new Error("GEMINI_QUOTA");
-    throw new Error("GEMINI_REQUEST_FAILED");
-  }
-
-  const candidate = data?.candidates?.[0];
-  const answer = (candidate?.content?.parts || [])
-    .map(part => typeof part.text === "string" ? part.text : "")
-    .join("")
-    .trim();
-
-  if (!answer) {
-    if (data?.promptFeedback?.blockReason) throw new Error("GEMINI_BLOCKED");
-    throw new Error("GEMINI_EMPTY_RESPONSE");
-  }
-  if (candidate?.finishReason === "MAX_TOKENS") {
-    console.warn("Gemini reached the output token limit.");
-  }
-  return answer;
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) throw new Error("MISSING_OPENROUTER_KEY");
+  const messages = [{ role: "system", content: SYSTEM_PROMPT },
+    ...safeHistory(history).map(item => ({ role: item.role === "model" ? "assistant" : "user", content: item.text }))];
+  messages.push({ role: "user", content: searchContext ? `${text}\n\nРезультаты поиска:\n${searchContext}` : text });
+  const { response, data } = await fetchJson("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+    body: JSON.stringify({ model: "openrouter/free", messages, max_tokens: 240, temperature: 0.5 })
+  }, Math.min(GEMINI_TIMEOUT_MS, timeoutMs));
+  if (!response.ok) { console.error("OpenRouter HTTP", response.status); throw new Error("OPENROUTER_FAILED"); }
+  const answer = data?.choices?.[0]?.message?.content;
+  if (typeof answer !== "string" || !answer.trim()) throw new Error("OPENROUTER_EMPTY");
+  return answer.trim();
 }
 
 function errorForUser(error) {
