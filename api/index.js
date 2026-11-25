@@ -111,16 +111,16 @@ async function searchWeb(query, timeoutMs) {
 }
 
 async function askGemini(text, history, searchContext, timeoutMs) {
-  const key = process.env.OPENROUTER_API_KEY;
+  const key = process.env.DEEPSEEK_API_KEY;
   if (!key) throw new Error("MISSING_OPENROUTER_KEY");
   const messages = [{ role: "system", content: SYSTEM_PROMPT },
     ...safeHistory(history).map(item => ({ role: item.role === "model" ? "assistant" : "user", content: item.text }))];
   messages.push({ role: "user", content: searchContext ? `${text}\n\nРезультаты поиска:\n${searchContext}` : text });
-  const { response, data } = await fetchJson("https://openrouter.ai/api/v1/chat/completions", {
+  const { response, data } = await fetchJson("https://api.deepseek.com/chat/completions", {
     method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
-    body: JSON.stringify({ model: "openrouter/free", messages, max_tokens: 240, temperature: 0.5 })
+    body: JSON.stringify({ model: "deepseek-flash", thinking: { type: "disabled" }, messages, max_tokens: 240, temperature: 0.5 })
   }, Math.min(GEMINI_TIMEOUT_MS, timeoutMs));
-  if (!response.ok) { console.error("OpenRouter HTTP", response.status); throw new Error("OPENROUTER_FAILED"); }
+  if (!response.ok) { console.error("DeepSeek HTTP", response.status); throw new Error("OPENROUTER_FAILED"); }
   const answer = data?.choices?.[0]?.message?.content;
   if (typeof answer !== "string" || !answer.trim()) throw new Error("OPENROUTER_EMPTY");
   return answer.trim();
